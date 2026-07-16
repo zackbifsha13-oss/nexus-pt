@@ -1,0 +1,39 @@
+Refactor my current React desktop app in apps/desktop so that it is tailored to Greece and initially to Athens, while remaining easy to adapt later to other cities.
+
+Requirements:
+- make Athens the default operational city
+- all mock data, labels, routes, disruption scenarios, and operator terminology should reflect Athens
+- keep the structure adaptable for future cities
+
+Transport modes to use:
+- Metro
+- Tram
+- Buses
+- Taxi / ride-hailing
+- 3 separate micromobility operators
+
+Important:
+- do not use generic fictional transport systems anymore
+- use Athens-style station, area, and corridor naming
+- use realistic operational language for an operator console
+- keep the UI structure the same
+- keep everything frontend-only for now
+- use mock data only, but make it realistic and consistent
+
+Please update only the files that need changes, especially:
+- InterventionsPage.tsx
+- DashboardPage.tsx
+- NetworkPage.tsx
+- any shared mock data if needed
+
+Design goals:
+- Greece-first
+- Athens-first
+- expandable later to other cities
+- no backend yet
+
+Output ONLY:
+1. file path
+2. full file content
+
+Do not explain.

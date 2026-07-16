@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Nea Smyrni",
+        "name_el": "Νέα Σμύρνη",
+        "osm_relation": 1391564,
+        "source": "OpenStreetMap"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [23.702173, 37.951531],
+          [23.704895, 37.943938],
+          [23.712652, 37.936891],
+          [23.724439, 37.939575],
+          [23.727322, 37.946763],
+          [23.722738, 37.954106],
+          [23.712238, 37.956535],
+          [23.702173, 37.951531]
+        ]]
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+type Listener = () => void;
+
+export type HopVehicle = {
+  id: string;
+  lng: number;
+  lat: number;
+  battery: number;
+  available: boolean;
+};
+
+let vehicles: HopVehicle[] = [];
+let listeners: Listener[] = [];
+
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+function randomVehicle(i: number): HopVehicle {
+  return {
+    id: "HOP-" + i,
+    lng: 23.72 + (Math.random() - 0.5) * 0.05,
+    lat: 37.97 + (Math.random() - 0.5) * 0.05,
+    battery: Math.round(30 + Math.random() * 70),
+    available: Math.random() > 0.2,
+  };
+}
+
+export function startHopMock() {
+  setInterval(() => {
+    vehicles = Array.from({ length: 40 }, (_, i) => randomVehicle(i));
+    emit();
+  }, 5000);
+}
+
+export function getHopVehicles() {
+  return vehicles;
+}
+
+export function subscribeHop(listener: Listener) {
+  listeners.push(listener);
+  return () => {
+    listeners = listeners.filter((l) => l !== listener);
+  };
+}

@@ -1,0 +1,30 @@
+My React + Vite app in apps/desktop is running.
+
+Generate the exact file contents needed to support these custom Tailwind classes used in my UI:
+- bg-surface
+- bg-panel
+- bg-muted
+- bg-accent
+- bg-ok
+- bg-warn
+- bg-crit
+- bg-info
+- border-border
+- text-text
+- text-sub
+- text-dim
+- text-ok
+- text-warn
+- text-crit
+- text-info
+
+Update only the minimum necessary files:
+- tailwind.config.js
+- src/index.css
+
+Also provide a clean dark operator-console base style.
+
+Output ONLY:
+1. file path
+2. full file content
+Do not explain.

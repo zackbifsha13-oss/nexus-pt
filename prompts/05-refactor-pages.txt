@@ -1,0 +1,21 @@
+Refactor my current React starter app inside apps/desktop into a cleaner structure.
+
+Requirements:
+- keep React + TypeScript
+- create reusable Sidebar component
+- create separate page components:
+  DashboardPage
+  NetworkPage
+  DisruptionsPage
+  InterventionsPage
+  AuditLogPage
+  SettingsPage
+- keep styling simple and clean
+- no backend yet
+- keep everything compatible with the current Vite setup
+
+Output ONLY:
+1. file path
+2. full file content
+
+Do not explain.

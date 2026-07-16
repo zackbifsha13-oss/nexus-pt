@@ -1,0 +1,30 @@
+Refactor my React + TypeScript app in apps/desktop so that Dashboard, Network, Disruptions, and Interventions all use a single shared mock data source.
+
+Create a file:
+- apps/desktop/src/data/athensData.ts
+
+Move into that file:
+- Athens disruptions
+- Athens interventions
+- dashboard summary metrics
+- network line status
+
+Then update these pages to import from the shared file:
+- DashboardPage.tsx
+- NetworkPage.tsx
+- DisruptionsPage.tsx
+- InterventionsPage.tsx
+
+Requirements:
+- keep the app frontend-only
+- keep Athens as the default city
+- structure the data so other cities can be added later
+- keep the current working UI behavior
+- do not introduce backend yet
+- output only the files that need to change
+
+Output ONLY:
+1. file path
+2. full file content
+
+Do not explain.

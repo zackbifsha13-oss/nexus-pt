@@ -1,0 +1,41 @@
+Build a complete InterventionsPage for my React + TypeScript + Vite app inside apps/desktop.
+
+Requirements:
+- keep it frontend-only for now
+- no backend yet
+- use static mock data inside the page file or a nearby mock file
+- split layout into:
+  1. left panel = disruption event list
+  2. right panel = ranked intervention cards for selected event
+
+Each disruption event should include:
+- id
+- line
+- title
+- severity
+- affected passengers
+
+Each intervention card should include:
+- rank
+- action title
+- passenger-minutes-saved
+- confidence
+- rationale
+- buttons:
+  Accept
+  Reject
+
+Behavior:
+- clicking a disruption event updates the right-side intervention list
+- clicking Accept changes the card status to Accepted
+- clicking Reject changes the card status to Rejected
+- show selected disruption clearly
+- keep styling consistent with the dark operator console theme already in use
+
+Use Tailwind utility classes only.
+
+Output ONLY:
+1. file path
+2. full file content
+
+Do not explain.

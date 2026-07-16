@@ -1,0 +1,54 @@
+Build a DisruptionsPage for my React + TypeScript + Vite app in apps/desktop.
+
+Context:
+- This is an Athens-first transport operator console
+- Must match the Interventions page style and structure
+- Keep it frontend-only with realistic mock data
+
+Requirements:
+
+Layout:
+- left panel: list of disruptions
+- right panel: selected disruption details
+
+Each disruption must include:
+- id
+- mode (Metro, Tram, Bus, Taxi, Micromobility)
+- line or operator
+- title
+- location (Athens areas like Syntagma, Kifisias, Glyfada, Omonia, etc.)
+- severity (critical, high, medium, low)
+- affected passengers
+- status (active, stabilizing, resolved)
+- timestamp (mock)
+
+Right panel should show:
+- full title
+- line + mode
+- severity badge
+- affected passengers
+- location
+- status
+- short timeline (mock events)
+- simple description
+
+Design:
+- match dark operator console theme
+- use Tailwind only
+- consistent with Interventions page styling
+
+Behavior:
+- clicking a disruption updates right panel
+- highlight selected item
+
+Important:
+- use Athens-specific realistic scenarios
+- keep code clean and readable
+- no backend
+- no external APIs
+
+Output ONLY:
+1. file path
+2. full file content
+
+Do not explain.

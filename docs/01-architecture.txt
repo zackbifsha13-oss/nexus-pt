@@ -1,0 +1,1265 @@
+================================================================================
+NEXUS-PT: PUBLIC TRANSPORT DISRUPTION RESPONSE OPERATOR CONSOLE
+Full-Stack System Architecture
+================================================================================
+
+EXECUTIVE SUMMARY
+─────────────────
+Nexus-PT is a real-time operator console for coordinating multimodal public
+transport responses to disruptions. The system ingests live network state,
+detects disruptions, generates ranked intervention options with scoring, and
+tracks operator decisions via audit logging.
+
+Tech Stack:
+  - Desktop: Tauri + React + TypeScript
+  - Backend: FastAPI (Python)
+  - Graph Modeling: NetworkX
+  - Database: SQLite (v1)
+  - Orchestration: Docker Compose
+  - Dev: Node 18+, Python 3.11+
+
+
+================================================================================
+1. SYSTEM ARCHITECTURE DIAGRAM (Text Form)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         OPERATOR CONSOLE (Desktop)                      │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                    React UI + TypeScript                        │  │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐ │  │
+│  │  │ LiveNetwork │  │  Disruption  │  │  Intervention Options  │ │  │
+│  │  │   View      │  │   Alerts     │  │  (ranked + scores)     │ │  │
+│  │  └─────────────┘  └──────────────┘  └────────────────────────┘ │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │  │
+│  │  │  Decision    │  │   Audit Log  │  │   Settings / Admin     │ │  │
+│  │  │  Workflow    │  │   Viewer     │  │                        │ │  │
+│  │  └──────────────┘  └──────────────┘  └────────────────────────┘ │  │
+│  │                                                                   │  │
+│  │  ┌────────────────────────────────────────────────────────────┐  │  │
+│  │  │           Client State Management (Redux/Zustand)         │  │  │
+│  │  │  • Network topology cache                                 │  │  │
+│  │  │  • Real-time node/edge updates                            │  │  │
+│  │  │  • UI state (filters, selections)                         │  │  │
+│  │  └────────────────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                            │                                            │
+│                            ▼                                            │
+│                    ┌─────────────────┐                                  │
+│                    │  Tauri Bridge   │                                  │
+│                    │  (WebSocket +   │                                  │
+│                    │   REST)         │                                  │
+│                    └─────────────────┘                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                ┌─────────────┼─────────────┐
+                │             │             │
+                ▼             ▼             ▼
+        ┌────────────┐ ┌────────────┐ ┌──────────────┐
+        │  WebSocket │ │  REST API  │ │   Local DB   │
+        │   Streams  │ │  (GraphQL) │ │   (SQLite)   │
+        └────────────┘ └────────────┘ └──────────────┘
+                │             │             │
+                └─────────────┼─────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────────────┐
+        │           Backend (FastAPI + Python)         │
+        │                                              │
+        │  ┌─────────────────────────────────────────┐ │
+        │  │      API Layer (Rest + WebSocket)       │ │
+        │  │  • /api/network                         │ │
+        │  │  • /api/disruptions                     │ │
+        │  │  • /api/interventions                   │ │
+        │  │  • /api/decisions                       │ │
+        │  │  • /api/audit-log                       │ │
+        │  └─────────────────────────────────────────┘ │
+        │                    │                         │
+        │  ┌─────────────────▼─────────────────────┐  │
+        │  │    Service Layer (Domain Logic)       │  │
+        │  │  • NetworkService                     │  │
+        │  │  • DisruptionDetectionService         │  │
+        │  │  • InterventionGeneratorService       │  │
+        │  │  • ScoringService                     │  │
+        │  │  • AuditService                       │  │
+        │  └─────────────────────────────────────────┘  │
+        │                    │                         │
+        │  ┌─────────────────▼─────────────────────┐  │
+        │  │    Model Layer (Data + Algorithms)    │  │
+        │  │  • NetworkModel (NetworkX graph)      │  │
+        │  │  • DisruptionDetector                 │  │
+        │  │  • InterventionRanker                 │  │
+        │  │  • PassengerFlowEstimator             │  │
+        │  └─────────────────────────────────────────┘  │
+        │                    │                         │
+        │  ┌─────────────────▼─────────────────────┐  │
+        │  │      Repository Layer (Data Access)   │  │
+        │  │  • NetworkRepository                  │  │
+        │  │  • DisruptionRepository                │  │
+        │  │  • DecisionRepository                 │  │
+        │  │  • AuditRepository                    │  │
+        │  └─────────────────────────────────────────┘  │
+        │                    │                         │
+        └────────────────────┼──────────────────────────┘
+                             │
+                ┌────────────┴────────────┐
+                │                         │
+                ▼                         ▼
+        ┌──────────────────┐   ┌──────────────────┐
+        │   SQLite DB      │   │  External Data   │
+        │  • Network State │   │  Sources (APIs)  │
+        │  • Disruptions   │   │  • GTFS Realtime │
+        │  • Decisions     │   │  • Traffic Data  │
+        │  • Audit Log     │   │  • Alerts Feed   │
+        └──────────────────┘   └──────────────────┘
+
+
+================================================================================
+2. SERVICE BREAKDOWN
+================================================================================
+
+FRONTEND SERVICES (React/TypeScript)
+────────────────────────────────────
+
+NetworkStateService
+  - Manages live network graph visualization
+  - Tracks node/edge state, incidents, congestion
+  - Subscribes to WebSocket updates
+  - Methods:
+    • subscribeToNetworkUpdates()
+    • updateNodeState(nodeId, state)
+    • addEdgeIncident(edgeId, incident)
+    • getNetworkSnapshot()
+
+DisruptionAlertService
+  - Real-time disruption notifications
+  - Severity-based filtering and prioritization
+  - Methods:
+    • subscribeToDisruptions()
+    • dismissAlert(disruptionId)
+    • filterByMode(modes: TransportMode[])
+    • getActiveDisruptions()
+
+InterventionUIService
+  - Displays ranked intervention options
+  - Manages intervention detail expansion/collapse
+  - Methods:
+    • getInterventionsForDisruption(disruptionId)
+    • expandInterventionDetail(interventionId)
+    • collapseInterventionDetail(interventionId)
+
+DecisionWorkflowService
+  - Manages operator decision workflow state
+  - Tracks accept/modify/reject actions
+  - Methods:
+    • submitDecision(disruptionId, intervention, decision)
+    • modifyIntervention(interventionId, modifications)
+    • rejectIntervention(interventionId, reason)
+    • getDecisionHistory()
+
+AuditUIService
+  - Displays decision audit trail
+  - Filtering, search, export
+  - Methods:
+    • getAuditLog(filters)
+    • searchAuditLog(query)
+    • exportAuditLog(format)
+
+
+BACKEND SERVICES (FastAPI/Python)
+──────────────────────────────────
+
+NetworkService
+  - Core network graph management
+  - Multi-modal transport support (bus, metro, tram, rail, DRT, taxi, micromobility)
+  - Node/edge lifecycle
+  - Capabilities:
+    • loadNetwork(source)
+    • updateNodeCapacity(nodeId, capacity)
+    • updateEdgeTravel(edgeId, travelTime)
+    • getNetworkSnapshot()
+    • validateNetworkIntegrity()
+  - Delegates to: NetworkModel, NetworkRepository
+
+DisruptionDetectionService
+  - Monitors for disruptions (link closures, capacity loss, etc.)
+  - Real-time pattern matching
+  - Propagates downstream impacts
+  - Capabilities:
+    • detectDisruption(event)
+    • propagateDownstreamImpact(nodeId, mode)
+    • markDisruptionResolved(disruptionId)
+    • getActiveDisruptions()
+  - Delegates to: DisruptionDetector, DisruptionRepository
+
+InterventionGeneratorService
+  - Generates candidate interventions for detected disruptions
+  - Considers available modes, capacity, routes
+  - Returns unsorted candidates
+  - Capabilities:
+    • generateInterventions(disruption)
+    • filterByMode(interventions, modes)
+    • filterByCapacity(interventions, availableCapacity)
+  - Delegates to: NetworkModel, PassengerFlowEstimator
+
+ScoringService
+  - Ranks interventions by multiple criteria
+  - Calculates passenger-minutes-saved, confidence
+  - Returns ranked list with explanations
+  - Scoring factors:
+    • Passenger impact (minutes saved)
+    • Implementation feasibility
+    • Resource availability
+    • Confidence (data quality, model certainty)
+  - Capabilities:
+    • scoreIntervention(intervention, context)
+    • rankInterventions(interventions)
+    • explainScore(intervention)
+  - Delegates to: PassengerFlowEstimator, InterventionRanker
+
+AuditService
+  - Logs all operator decisions
+  - Stores rationale, modifications, timestamps
+  - Ensures regulatory compliance (GDPR, audit trail requirements)
+  - Capabilities:
+    • logDecision(decision, operator, rationale)
+    • logModification(interventionId, oldState, newState)
+    • getAuditTrail(filters)
+    • exportAuditLog(format, startDate, endDate)
+  - Delegates to: AuditRepository
+
+ConfigService
+  - System configuration management
+  - Scoring weights, thresholds, mode availability
+  - Operator permissions/roles
+  - Capabilities:
+    • getConfig(section)
+    • updateConfig(section, values)
+    • validateConfig()
+
+ExternalDataService
+  - Interfaces with external data sources
+  - GTFS-RT feeds, traffic APIs, weather services
+  - Async updates to network state
+  - Capabilities:
+    • fetchGTFSRT(feed_url)
+    • pollTrafficData()
+    • pollWeatherAlerts()
+
+
+================================================================================
+3. DATA FLOW
+================================================================================
+
+INGESTION FLOW
+──────────────
+External Data Sources
+  (GTFS-RT, traffic APIs, alerts)
+         │
+         ▼
+ExternalDataService (polling/webhooks)
+         │
+         ▼
+NetworkService + DisruptionDetectionService
+  (updates node/edge state, detects issues)
+         │
+         ▼
+Network Repository (persist changes)
+  & WebSocket broadcast to frontend
+         │
+         ▼
+Frontend (real-time updates to UI)
+
+
+DISRUPTION DETECTION & INTERVENTION FLOW
+─────────────────────────────────────────
+Disruption Event
+         │
+         ▼
+DisruptionDetectionService
+  (pattern match, impact analysis)
+         │
+         ▼
+Disruption Repository
+  (persist with severity, timestamp, affected_modes)
+         │
+         ▼
+WebSocket Alert to Frontend
+         │
+         ▼
+Operator Views Alert
+         │
+         ▼
+Operator Requests Intervention Options
+         │
+         ▼
+InterventionGeneratorService
+  (candidate generation from graph)
+         │
+         ▼
+ScoringService
+  (rank by passenger-minutes-saved, confidence)
+         │
+         ▼
+Frontend Displays Ranked List
+  (with plain-language rationale)
+
+
+DECISION & AUDIT FLOW
+─────────────────────
+Operator Selects Intervention
+         │
+         ├─► Accept: submit decision
+         ├─► Modify: alter parameters, resubmit
+         └─► Reject: record reason
+         │
+         ▼
+Backend DecisionAPI
+  (validate, persist)
+         │
+         ▼
+AuditService
+  (log decision, modifications, operator, rationale)
+         │
+         ▼
+Audit Repository
+  (SQLite audit_log table)
+         │
+         ▼
+Frontend Audit Log View
+  (operator can review, search, export)
+
+
+================================================================================
+4. MONOREPO FOLDER STRUCTURE
+================================================================================
+
+nexus-pt/
+├── docker-compose.yml              # Orchestration
+├── .env.example                     # Environment template
+│
+├── frontend/                        # Desktop UI (Tauri + React)
+│   ├── src-tauri/                   # Tauri backend (Rust)
+│   │   ├── src/
+│   │   │   ├── main.rs
+│   │   │   └── cmd.rs               # IPC commands
+│   │   ├── Cargo.toml
+│   │   └── tauri.conf.json
+│   ├── src/                         # React TypeScript
+│   │   ├── components/
+│   │   │   ├── NetworkViewer.tsx    # Interactive graph
+│   │   │   ├── DisruptionAlert.tsx
+│   │   │   ├── InterventionPanel.tsx
+│   │   │   ├── DecisionWorkflow.tsx
+│   │   │   ├── AuditLogViewer.tsx
+│   │   │   └── SettingsModal.tsx
+│   │   ├── pages/
+│   │   │   ├── Dashboard.tsx
+│   │   │   ├── Network.tsx
+│   │   │   ├── Interventions.tsx
+│   │   │   ├── AuditLog.tsx
+│   │   │   └── Settings.tsx
+│   │   ├── services/
+│   │   │   ├── networkStateService.ts
+│   │   │   ├── disruptionAlertService.ts
+│   │   │   ├── interventionUIService.ts
+│   │   │   ├── decisionWorkflowService.ts
+│   │   │   └── auditUIService.ts
+│   │   ├── hooks/
+│   │   │   ├── useNetworkState.ts
+│   │   │   ├── useDisruptionAlerts.ts
+│   │   │   └── useInterventionRanking.ts
+│   │   ├── state/
+│   │   │   ├── networkSlice.ts      # Redux slices
+│   │   │   ├── disruptionSlice.ts
+│   │   │   ├── interventionSlice.ts
+│   │   │   ├── decisionSlice.ts
+│   │   │   ├── auditSlice.ts
+│   │   │   └── store.ts
+│   │   ├── types/
+│   │   │   ├── network.ts           # TypeScript interfaces
+│   │   │   ├── disruption.ts
+│   │   │   ├── intervention.ts
+│   │   │   ├── decision.ts
+│   │   │   ├── audit.ts
+│   │   │   └── api.ts
+│   │   ├── api/
+│   │   │   ├── client.ts            # HTTP/WS client
+│   │   │   ├── endpoints.ts
+│   │   │   └── interceptors.ts
+│   │   ├── utils/
+│   │   │   ├── graph.ts             # Graph utilities
+│   │   │   ├── scoring.ts
+│   │   │   └── formatters.ts
+│   │   ├── App.tsx
+│   │   ├── index.tsx
+│   │   └── styles/
+│   │       ├── theme.css
+│   │       └── components.css
+│   ├── public/
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   └── .prettierrc
+│
+├── backend/                         # FastAPI server (Python)
+│   ├── app/
+│   │   ├── main.py                  # FastAPI app entrypoint
+│   │   ├── config.py                # Configuration
+│   │   │
+│   │   ├── api/
+│   │   │   ├── routes/
+│   │   │   │   ├── network.py       # GET /api/network
+│   │   │   │   ├── disruptions.py   # GET/POST /api/disruptions
+│   │   │   │   ├── interventions.py # GET /api/interventions
+│   │   │   │   ├── decisions.py     # POST /api/decisions
+│   │   │   │   ├── audit.py         # GET /api/audit-log
+│   │   │   │   └── admin.py         # POST /api/admin (config)
+│   │   │   ├── websocket.py         # WebSocket handlers
+│   │   │   └── dependencies.py      # FastAPI dependencies
+│   │   │
+│   │   ├── services/
+│   │   │   ├── network_service.py
+│   │   │   ├── disruption_detection_service.py
+│   │   │   ├── intervention_generator_service.py
+│   │   │   ├── scoring_service.py
+│   │   │   ├── audit_service.py
+│   │   │   ├── config_service.py
+│   │   │   └── external_data_service.py
+│   │   │
+│   │   ├── models/
+│   │   │   ├── network_model.py     # NetworkX-based graph
+│   │   │   ├── disruption_detector.py
+│   │   │   ├── intervention_ranker.py
+│   │   │   ├── passenger_flow_estimator.py
+│   │   │   └── scoring_engine.py
+│   │   │
+│   │   ├── repositories/
+│   │   │   ├── base.py              # Base repository
+│   │   │   ├── network_repository.py
+│   │   │   ├── disruption_repository.py
+│   │   │   ├── decision_repository.py
+│   │   │   └── audit_repository.py
+│   │   │
+│   │   ├── schemas/
+│   │   │   ├── network.py           # Pydantic models (request/response)
+│   │   │   ├── disruption.py
+│   │   │   ├── intervention.py
+│   │   │   ├── decision.py
+│   │   │   └── audit.py
+│   │   │
+│   │   ├── db/
+│   │   │   ├── models.py            # SQLAlchemy models
+│   │   │   ├── session.py           # DB session/connection
+│   │   │   ├── migrations/          # Alembic migrations
+│   │   │   │   └── versions/
+│   │   │   └── init.py
+│   │   │
+│   │   ├── utils/
+│   │   │   ├── graph_utils.py
+│   │   │   ├── validators.py
+│   │   │   └── logging.py
+│   │   │
+│   │   └── __init__.py
+│   │
+│   ├── tests/
+│   │   ├── unit/
+│   │   │   ├── test_network_service.py
+│   │   │   ├── test_disruption_detector.py
+│   │   │   ├── test_scoring_service.py
+│   │   │   └── test_audit_service.py
+│   │   ├── integration/
+│   │   │   ├── test_api_network.py
+│   │   │   ├── test_api_disruptions.py
+│   │   │   ├── test_workflow.py
+│   │   │   └── conftest.py
+│   │   └── fixtures/
+│   │       ├── sample_network.py
+│   │       ├── sample_disruptions.py
+│   │       └── sample_decisions.py
+│   │
+│   ├── scripts/
+│   │   ├── init_db.py               # Initialize SQLite schema
+│   │   ├── load_sample_network.py   # Load test data
+│   │   └── export_audit_log.py
+│   │
+│   ├── requirements.txt
+│   ├── requirements-dev.txt
+│   ├── pytest.ini
+│   ├── pyproject.toml
+│   └── Dockerfile
+│
+├── docs/                            # Documentation
+│   ├── 01-architecture.txt          # This file
+│   ├── 02-api-specification.md
+│   ├── 03-database-schema.md
+│   ├── 04-setup-guide.md
+│   ├── 05-development-guide.md
+│   ├── 06-deployment.md
+│   ├── 07-scoring-algorithm.md
+│   └── images/
+│       └── network-diagram.png
+│
+├── notes/                           # Working notes
+│   ├── phase-planning.md
+│   ├── scoring-weights.md
+│   └── operator-workflows.md
+│
+└── README.md                        # Project overview
+
+
+================================================================================
+5. FRONTEND ROUTE STRUCTURE
+================================================================================
+
+React Router Configuration:
+
+/                           → Dashboard (main landing)
+  ├── /dashboard            → Real-time overview
+  │   ├── Active disruptions
+  │   ├── System health
+  │   └── Quick stats
+  │
+  ├── /network              → Network visualization
+  │   ├── Interactive graph view
+  │   ├── Node/edge details panel
+  │   ├── Filter by mode (bus, metro, tram, rail, DRT, taxi, micromobility)
+  │   └── Live capacity/travel-time heatmap
+  │
+  ├── /disruptions          → Disruption list & details
+  │   ├── Sortable table (severity, timestamp, mode, affected_lines)
+  │   ├── Search & filter
+  │   ├── Individual disruption detail page
+  │   │   ├── Affected routes
+  │   │   ├── Estimated passenger impact
+  │   │   └── Linked interventions
+  │   └── Create manual disruption (admin)
+  │
+  ├── /interventions        → Intervention workflow
+  │   ├── List active disruptions needing intervention
+  │   ├── For each disruption:
+  │   │   ├── Ranked intervention options (scrollable)
+  │   │   ├── Intervention detail card
+  │   │   │   ├── Plain-language description
+  │   │   │   ├── Passenger-minutes-saved score
+  │   │   │   ├── Confidence %
+  │   │   │   ├── Rationale/explanation
+  │   │   │   ├── Resource requirements
+  │   │   │   └── Action buttons: Accept / Modify / Reject
+  │   │   └── Modification form (if accepted)
+  │   │       ├── Route adjustments
+  │   │       ├── Capacity changes
+  │   │       └── Timing adjustments
+  │   └── Confirmation dialog before submission
+  │
+  ├── /audit-log            → Audit trail viewer
+  │   ├── Searchable table (operator, date, action, rationale)
+  │   ├── Filters:
+  │   │   ├── Date range
+  │   │   ├── Operator
+  │   │   ├── Action type (accept/modify/reject)
+  │   │   └── Disruption severity
+  │   ├── Detail expansion (show before/after state)
+  │   ├── Export button (CSV, JSON, PDF)
+  │   └── Compliance report generator
+  │
+  ├── /settings             → Configuration & admin
+  │   ├── Operator roles & permissions
+  │   ├── Scoring weights configuration
+  │   │   ├── Passenger-minutes factor
+  │   │   ├── Feasibility factor
+  │   │   ├── Confidence weighting
+  │   │   └── Cost-benefit ratio
+  │   ├── Data sources & polling intervals
+  │   │   ├── GTFS-RT feed URLs
+  │   │   ├── Traffic API keys
+  │   │   ├── Weather alert sources
+  │   │   └── Poll frequency
+  │   ├── Transport mode availability
+  │   │   ├── Bus fleet size
+  │   │   ├── Metro capacity
+  │   │   ├── DRT vehicle count
+  │   │   ├── Taxi availability
+  │   │   └── Micromobility provider integrations
+  │   ├── Notification preferences
+  │   ├── System status & health
+  │   └── Database export
+  │
+  └── /login                → Authentication (if needed)
+      └── Operator credentials
+
+Nested Layout Components:
+  - MainLayout (header, sidebar navigation)
+  - ContentLayout (for full-width content)
+  - ModalLayout (intervention modification, alert dialogs)
+
+
+================================================================================
+6. API BOUNDARIES
+================================================================================
+
+BASE URL: http://localhost:8000 (development)
+
+WEB SOCKET ENDPOINT
+───────────────────
+ws://localhost:8000/ws/updates
+  Publishes real-time updates:
+  - Network state changes (node/edge updates)
+  - New disruptions detected
+  - Intervention ranking updates
+  - Decision confirmations
+  - Connection health
+
+
+REST API ENDPOINTS
+──────────────────
+
+NETWORK
+  GET /api/network
+    Query params:
+      - include_inactive: bool (default: false)
+      - format: 'json' | 'geojson' (default: 'json')
+    Response:
+      {
+        "nodes": [
+          {
+            "id": "metro_a1",
+            "name": "Station A",
+            "type": "metro_station",
+            "modes": ["metro"],
+            "capacity": 5000,
+            "current_load": 3200,
+            "status": "operational",
+            "location": {"lat": 51.5, "lon": -0.1}
+          }
+        ],
+        "edges": [
+          {
+            "id": "metro_a1_b1",
+            "source": "metro_a1",
+            "target": "metro_b1",
+            "modes": ["metro"],
+            "travel_time_nominal": 120,
+            "travel_time_current": 180,
+            "capacity": 1200,
+            "status": "congested"
+          }
+        ]
+      }
+
+  GET /api/network/node/{node_id}
+    Response: Detailed node with incident history
+
+  GET /api/network/edge/{edge_id}
+    Response: Detailed edge with travel time trend
+
+  POST /api/network/update
+    Body:
+      {
+        "updates": [
+          {
+            "type": "node" | "edge",
+            "id": "...",
+            "changes": {...}
+          }
+        ]
+      }
+    Response: {success: true, affected_count: int}
+
+
+DISRUPTIONS
+  GET /api/disruptions
+    Query params:
+      - status: 'active' | 'resolved' | 'all'
+      - modes: 'bus,metro,tram' (comma-separated)
+      - severity: 'critical,high' (comma-separated)
+      - limit: int (default: 100)
+      - offset: int (default: 0)
+    Response:
+      {
+        "disruptions": [
+          {
+            "id": "dis_001",
+            "type": "link_closure",
+            "severity": "high",
+            "modes": ["metro"],
+            "affected_lines": ["M1", "M2"],
+            "description": "Signal failure at Metro A1",
+            "start_time": "2026-04-21T10:30:00Z",
+            "estimated_end_time": "2026-04-21T12:30:00Z",
+            "affected_nodes": ["metro_a1", "metro_a2"],
+            "estimated_affected_passengers": 12000,
+            "status": "active"
+          }
+        ],
+        "total": int,
+        "timestamp": "2026-04-21T10:35:00Z"
+      }
+
+  GET /api/disruptions/{disruption_id}
+    Response: Detailed disruption with incident chain
+
+  POST /api/disruptions/manual
+    Requires: admin role
+    Body:
+      {
+        "type": "link_closure" | "capacity_loss" | "route_diversion",
+        "severity": "critical" | "high" | "medium" | "low",
+        "modes": ["bus", "metro"],
+        "description": "...",
+        "affected_nodes": ["node_id1", "node_id2"],
+        "estimated_duration_minutes": 120
+      }
+    Response: {id: string, status: "created"}
+
+  PATCH /api/disruptions/{disruption_id}
+    Body: {status: "resolved" | "escalated"}
+    Response: Updated disruption object
+
+
+INTERVENTIONS
+  GET /api/interventions
+    Query params:
+      - disruption_id: string (required)
+      - limit: int (default: 10)
+    Response:
+      {
+        "interventions": [
+          {
+            "id": "int_001",
+            "disruption_id": "dis_001",
+            "type": "capacity_augmentation" | "route_diversion" | "modal_shift",
+            "description": "Deploy additional bus services on route B1-B2",
+            "resources_required": {
+              "additional_buses": 5,
+              "staff": 10,
+              "estimated_cost": 2500
+            },
+            "passenger_minutes_saved": 45000,
+            "confidence": 0.82,
+            "rationale": "Signal failure affects metro capacity by 40%. Diverting 30% of passengers to bus augmentation saves ~45k passenger-minutes.",
+            "score": 8.2,
+            "rank": 1,
+            "implementation_time_minutes": 15,
+            "risks": ["bus_driver_availability", "transfer_reluctance"],
+            "timestamp": "2026-04-21T10:32:00Z"
+          },
+          {...rank 2...},
+          {...rank 3...}
+        ],
+        "generated_at": "2026-04-21T10:32:00Z"
+      }
+
+  POST /api/interventions/regenerate
+    Body: {disruption_id: string}
+    Response: Newly ranked interventions
+
+
+DECISIONS
+  POST /api/decisions
+    Body:
+      {
+        "disruption_id": "dis_001",
+        "intervention_id": "int_001",
+        "action": "accept" | "modify" | "reject",
+        "modifications": {
+          "additional_buses": 4,  # If modified
+          "priority": "high"
+        },
+        "rationale": "Accepting with 1 fewer bus to preserve fleet flexibility",
+        "operator_id": "op_123"
+      }
+    Response:
+      {
+        "decision_id": "dec_001",
+        "status": "recorded",
+        "audit_log_entry": "audi_001",
+        "timestamp": "2026-04-21T10:35:00Z"
+      }
+
+  GET /api/decisions
+    Query params:
+      - disruption_id: string
+      - limit: int
+    Response: List of decisions with timestamps
+
+  GET /api/decisions/{decision_id}
+    Response: Full decision record
+
+
+AUDIT LOG
+  GET /api/audit-log
+    Query params:
+      - start_date: ISO datetime (required)
+      - end_date: ISO datetime (required)
+      - operator_id: string
+      - action: "accept" | "modify" | "reject"
+      - page: int (default: 1)
+      - per_page: int (default: 50)
+    Response:
+      {
+        "entries": [
+          {
+            "id": "audi_001",
+            "timestamp": "2026-04-21T10:35:00Z",
+            "operator_id": "op_123",
+            "action": "accept",
+            "disruption_id": "dis_001",
+            "intervention_id": "int_001",
+            "before_state": {...},
+            "after_state": {...},
+            "rationale": "...",
+            "modifications": {}
+          }
+        ],
+        "total": int,
+        "page": int
+      }
+
+  GET /api/audit-log/export
+    Query params:
+      - format: 'csv' | 'json' | 'pdf'
+      - start_date, end_date, etc.
+    Response: File download
+
+
+ADMIN & CONFIG
+  GET /api/admin/config
+    Requires: admin role
+    Response: Current configuration object
+
+  PATCH /api/admin/config
+    Requires: admin role
+    Body: Configuration object with updates
+    Response: Updated configuration
+
+  GET /api/admin/health
+    Response: System health (DB, WebSocket, external APIs)
+
+  POST /api/admin/recalculate-scores
+    Requires: admin role
+    Body: {disruption_id: string}
+    Response: Newly calculated scores
+
+  GET /api/admin/logs
+    Requires: admin role
+    Response: Server application logs
+
+
+ERROR RESPONSES
+  All endpoints return standard error format:
+  {
+    "error": "error_code",
+    "message": "Human-readable message",
+    "details": {...optional context...},
+    "timestamp": "2026-04-21T10:35:00Z"
+  }
+
+  Common error codes:
+    - INVALID_REQUEST: Request validation failed
+    - DISRUPTION_NOT_FOUND
+    - UNAUTHORIZED: Insufficient permissions
+    - CONFLICT: State conflict (e.g., intervention already applied)
+    - INTERNAL_ERROR: Server error
+
+
+AUTHENTICATION (if applicable in later phases)
+  Header: Authorization: Bearer {token}
+  Response: 401 Unauthorized if missing/invalid
+
+
+================================================================================
+7. DEVELOPMENT PHASES
+================================================================================
+
+PHASE 1: FOUNDATION (Weeks 1-3)
+───────────────────────────────
+Objectives:
+  • Set up monorepo, Docker Compose, CI/CD pipeline
+  • Build basic backend infrastructure
+  • Create minimal frontend shell
+  • Establish database schema
+
+Deliverables:
+  ✓ Docker Compose with FastAPI + React dev setup
+  ✓ SQLite schema (network, disruptions, decisions, audit_log tables)
+  ✓ FastAPI basic project structure with sample routes
+  ✓ React app with routing and basic layout
+  ✓ WebSocket connection infrastructure (no messages yet)
+  ✓ README with setup instructions
+
+Tasks:
+  [ ] Initialize monorepo structure
+  [ ] Create Dockerfile for backend + frontend
+  [ ] Set up docker-compose.yml
+  [ ] Create FastAPI app skeleton
+  [ ] Implement SQLite migrations (Alembic)
+  [ ] Create React project with routing
+  [ ] Establish Tauri configuration
+  [ ] Unit test infrastructure (pytest, Jest)
+
+
+PHASE 2: NETWORK MODELING (Weeks 4-6)
+──────────────────────────────────────
+Objectives:
+  • Implement NetworkX-based network model
+  • Load sample multimodal network
+  • Build network API endpoints
+  • Create network visualization UI
+
+Deliverables:
+  ✓ NetworkModel class (NetworkX multimodal graph)
+  ✓ Network CRUD endpoints (GET, POST)
+  ✓ Sample network data (5-10 transit modes)
+  ✓ Network visualization component (react-flow)
+  ✓ Node/edge detail panels
+  ✓ Real-time updates via WebSocket
+
+Tasks:
+  [ ] Design and implement NetworkModel with NetworkX
+  [ ] Support multimodal nodes and edges
+  [ ] Implement node/edge lifecycle management
+  [ ] Create network serialization (JSON/GeoJSON)
+  [ ] Build NetworkService and repository layer
+  [ ] Create API endpoints (/api/network/*)
+  [ ] Implement graph visualization with react-flow-renderer
+  [ ] Add heatmap overlay for congestion
+  [ ] Implement node/edge detail popovers
+  [ ] Set up mock GTFS-RT data for testing
+
+
+PHASE 3: DISRUPTION DETECTION (Weeks 7-9)
+───────────────────────────────────────────
+Objectives:
+  • Build disruption detection engine
+  • Implement disruption CRUD endpoints
+  • Create alert UI
+  • Add audit logging foundation
+
+Deliverables:
+  ✓ DisruptionDetector engine
+  ✓ Disruption endpoints (GET, POST, PATCH)
+  ✓ Disruption alert UI with severity coloring
+  ✓ Disruption list/detail views
+  ✓ Manual disruption creation (admin)
+  ✓ AuditRepository with basic logging
+
+Tasks:
+  [ ] Implement DisruptionDetector with pattern matching
+  [ ] Create disruption propagation logic (downstream impacts)
+  [ ] Build DisruptionService with forecasting
+  [ ] Implement disruption repository layer
+  [ ] Create /api/disruptions/* endpoints
+  [ ] Build DisruptionAlert component
+  [ ] Create DisruptionDetail page
+  [ ] Implement severity-based filtering
+  [ ] Set up audit logging for disruptions
+  [ ] Create sample disruption scenarios for testing
+
+
+PHASE 4: INTERVENTION GENERATION (Weeks 10-12)
+───────────────────────────────────────────────
+Objectives:
+  • Implement intervention generator
+  • Build passenger flow estimator
+  • Create intervention API
+  • Display intervention options in UI
+
+Deliverables:
+  ✓ InterventionGenerator engine
+  ✓ PassengerFlowEstimator model
+  ✓ Intervention endpoints (GET, regenerate)
+  ✓ Intervention panel UI (unsorted list)
+  ✓ Plain-language description generation
+  ✓ Resource requirements calculation
+
+Tasks:
+  [ ] Design intervention types (capacity_augmentation, route_diversion, modal_shift)
+  [ ] Implement InterventionGeneratorService
+  [ ] Build candidate filtering (by mode, capacity, feasibility)
+  [ ] Implement PassengerFlowEstimator (OD matrix, path flow)
+  [ ] Estimate intervention impacts on passenger flows
+  [ ] Create InterventionRanker skeleton (no scoring yet)
+  [ ] Build /api/interventions endpoints
+  [ ] Implement plain-text generation utility
+  [ ] Create InterventionPanel component
+  [ ] Add resource requirement display
+
+
+PHASE 5: SCORING & RANKING (Weeks 13-15)
+──────────────────────────────────────────
+Objectives:
+  • Implement scoring engine
+  • Calculate passenger-minutes-saved
+  • Compute confidence scores
+  • Rank interventions
+  • Add rationale generation
+
+Deliverables:
+  ✓ ScoringService with multi-factor scoring
+  ✓ Passenger-minutes-saved calculation
+  ✓ Confidence scoring based on data quality
+  ✓ Ranked intervention list
+  ✓ Rationale explanation generation
+  ✓ Scoring weights configuration endpoint
+
+Tasks:
+  [ ] Define scoring algorithm (passenger impact, feasibility, resources, confidence)
+  [ ] Implement ScoringEngine with factor weighting
+  [ ] Calculate passenger-minutes-saved (disruption impact vs. intervention benefit)
+  [ ] Implement confidence scoring (data quality, model certainty)
+  [ ] Create rationale generation (explain scores in plain language)
+  [ ] Build InterventionRanker (sort by score)
+  [ ] Implement configurable scoring weights (/api/admin/config)
+  [ ] Create scoring explanation UI
+  [ ] Add score visualization (progress bars, confidence indicators)
+  [ ] Unit test scoring with various network scenarios
+
+
+PHASE 6: DECISION WORKFLOW (Weeks 16-18)
+──────────────────────────────────────────
+Objectives:
+  • Implement operator decision workflow
+  • Build accept/modify/reject logic
+  • Create decision persistence layer
+  • Add decision audit trail
+
+Deliverables:
+  ✓ Decision API endpoints (POST, GET)
+  ✓ Modification form UI
+  ✓ Decision validation logic
+  ✓ DecisionRepository with audit trail
+  ✓ Decision confirmation UI
+
+Tasks:
+  [ ] Implement decision schema (Pydantic model)
+  [ ] Build DecisionService with validation
+  [ ] Create decision repository layer
+  [ ] Implement modification handler (parameter adjustment)
+  [ ] Add decision state transitions (pending, accepted, modified, rejected)
+  [ ] Build /api/decisions endpoints
+  [ ] Create DecisionWorkflow component
+  [ ] Implement modification form with validation
+  [ ] Add confirmation dialogs
+  [ ] Log all decisions to audit_log table
+  [ ] Implement decision history retrieval
+
+
+PHASE 7: AUDIT & COMPLIANCE (Weeks 19-21)
+────────────────────────────────────────────
+Objectives:
+  • Build audit log viewer
+  • Implement search/filter/export
+  • Add compliance reporting
+  • Ensure regulatory requirements
+
+Deliverables:
+  ✓ AuditLogViewer component (searchable table)
+  ✓ Audit log export (CSV, JSON, PDF)
+  ✓ Date range and operator filtering
+  ✓ Full decision state tracking
+  ✓ Compliance report generator
+
+Tasks:
+  [ ] Create AuditLogViewer with React table library (TanStack)
+  [ ] Implement search across all fields
+  [ ] Add date range and operator filters
+  [ ] Create severity/action type filters
+  [ ] Implement export to CSV/JSON/PDF
+  [ ] Add compliance report template
+  [ ] Create before/after state diff viewer
+  [ ] Implement detailed audit entry expansion
+  [ ] Add audit data integrity checks
+  [ ] Create audit log archival strategy
+
+
+PHASE 8: EXTERNAL DATA INTEGRATION (Weeks 22-24)
+──────────────────────────────────────────────────
+Objectives:
+  • Connect to GTFS-RT feeds
+  • Integrate traffic APIs
+  • Add weather alerts
+  • Implement polling/webhook handlers
+
+Deliverables:
+  ✓ ExternalDataService with polling
+  ✓ GTFS-RT feed parser
+  ✓ Traffic data integration
+  ✓ Weather alert feeds
+  ✓ Network state auto-update on external events
+
+Tasks:
+  [ ] Implement ExternalDataService base structure
+  [ ] Build GTFS-RT feed parser
+  [ ] Create traffic API integrator (e.g., HERE, Google)
+  [ ] Add weather alert feed listener
+  [ ] Implement polling scheduler (configurable intervals)
+  [ ] Add webhook handlers for push updates
+  [ ] Create data source health monitoring
+  [ ] Implement fallback/redundancy for feeds
+  [ ] Add data freshness indicators in UI
+  [ ] Create data source configuration in settings
+
+
+PHASE 9: TESTING & HARDENING (Weeks 25-27)
+─────────────────────────────────────────────
+Objectives:
+  • Comprehensive test coverage
+  • Load testing
+  • Security review
+  • Performance optimization
+
+Deliverables:
+  ✓ Unit test suite (>80% coverage)
+  ✓ Integration tests for API workflows
+  ✓ Load test scenarios
+  ✓ Security audit report
+  ✓ Performance benchmarks
+
+Tasks:
+  [ ] Expand unit tests (NetworkService, ScoringService, etc.)
+  [ ] Create integration test suite (API workflows)
+  [ ] Add end-to-end tests (UI + backend)
+  [ ] Implement load testing (k6, Locust)
+  [ ] Security review (OWASP, SQL injection, XSS)
+  [ ] Add input validation hardening
+  [ ] Performance profiling and optimization
+  [ ] Database query optimization
+  [ ] WebSocket connection stability testing
+  [ ] Error handling edge cases
+
+
+PHASE 10: DEPLOYMENT & DOCUMENTATION (Weeks 28-30)
+─────────────────────────────────────────────────────
+Objectives:
+  • Production deployment setup
+  • Comprehensive documentation
+  • Operator training materials
+  • Release readiness
+
+Deliverables:
+  ✓ Docker production builds
+  ✓ Kubernetes manifests (optional)
+  ✓ System administration guide
+  ✓ Operator manual
+  ✓ API documentation (Swagger/OpenAPI)
+  ✓ Architecture documentation
+
+Tasks:
+  [ ] Create production Docker builds (multi-stage)
+  [ ] Set up environment configuration management
+  [ ] Create database backup/restore procedures
+  [ ] Implement health check endpoints
+  [ ] Add logging and monitoring (ELK, Prometheus)
+  [ ] Create operator runbooks
+  [ ] Write API documentation (FastAPI Swagger UI)
+  [ ] Create system architecture docs
+  [ ] Build operator training videos/slides
+  [ ] Prepare deployment checklist
+
+
+POST-LAUNCH PHASES (Weeks 31+)
+──────────────────────────────
+
+Phase 11: ADVANCED FEATURES
+  • Multi-operator concurrency handling
+  • Real-time intervention impact preview
+  • Machine learning for scoring optimization
+  • Predictive disruption detection
+
+Phase 12: SCALE & OPTIMIZATION
+  • Database migration (PostgreSQL for multi-site)
+  • Distributed scoring (job queue, async workers)
+  • Advanced caching strategies
+  • Microservices decomposition
+
+Phase 13: ENTERPRISE FEATURES
+  • Multi-city support
+  • Role-based access control (RBAC)
+  • Integration with traffic management systems
+  • API gateway for third-party integrations
+  • Webhook notifications for external systems
+  • Real-time operator collaboration features
+
+
+================================================================================
+TECHNICAL DEBT & CONSIDERATIONS
+================================================================================
+
+Performance
+  - Network graph serialization at scale (>10k nodes)
+  - WebSocket message batching for high-frequency updates
+  - Database indexing on frequently queried fields
+  - Frontend virtualization for large lists
+
+Scalability
+  - External data service becomes bottleneck (polling)
+  - Consider message queue (RabbitMQ) for disruption events
+  - Scoring engine may need async workers (Celery)
+  - SQLite limited to single writer; migrate to PostgreSQL at scale
+
+Reliability
+  - Implement circuit breakers for external APIs
+  - Database transaction management for consistency
+  - WebSocket reconnection strategy
+  - Graceful degradation when external data unavailable
+
+Security
+  - Role-based access control (future phase)
+  - API key management for external integrations
+  - Audit log immutability (prevent tampering)
+  - Input validation on all endpoints
+  - Rate limiting on API endpoints
+
+Maintainability
+  - Comprehensive API documentation (OpenAPI/Swagger)
+  - Design decision records (ADRs)
+  - Runbooks for common operations
+  - Automated test coverage for critical paths
+
+
+================================================================================
+QUICK START CHECKLIST
+================================================================================
+
+Pre-Development:
+  [ ] Clone monorepo
+  [ ] Install Docker Desktop
+  [ ] Copy .env.example to .env
+  [ ] Review this architecture document
+
+Development Setup:
+  [ ] docker-compose up -d
+  [ ] Backend: python -m pip install -r requirements-dev.txt
+  [ ] Frontend: npm install
+  [ ] Run tests: pytest (backend), npm test (frontend)
+  [ ] Start dev servers: npm run dev (frontend), npm run tauri dev
+
+Database:
+  [ ] Run migrations: alembic upgrade head
+  [ ] Load sample data: python scripts/load_sample_network.py
+
+API Development:
+  [ ] Review endpoints in Section 6
+  [ ] Start with /api/network endpoints
+  [ ] Use Swagger UI: http://localhost:8000/docs
+
+UI Development:
+  [ ] Routes in Section 5
+  [ ] Start with Dashboard and Network views
+  [ ] Use Redux DevTools for state debugging
+
+Testing:
+  [ ] Unit tests: pytest tests/unit/
+  [ ] Integration tests: pytest tests/integration/
+  [ ] Frontend: npm run test
+
+Deployment:
+  [ ] See Phase 10 for containerization
+  [ ] Follow 06-deployment.md for production setup
+
+
+================================================================================
+END OF ARCHITECTURE DOCUMENT
+================================================================================

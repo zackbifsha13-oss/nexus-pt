@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+**/.vite/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log
+
+# Backup folders
+backups*/
+*.bak
+*.bak.*
+*.backup
+*.tmp
+
+# Tauri build output
+target/
+
+# IDE
+.vscode/
+.idea/
+
+# Large local transport datasets
+apps/desktop/data/oasa-gtfs/
+apps/desktop/data/oasa_parts/
+apps/desktop/output.geojson
+
+# Large generated GTFS files
+apps/desktop/src/data/gtfs/*.generated.ts
+
+# Large GTFS source data
+apps/desktop/data/oasa-gtfs/
+apps/desktop/data/oasa_parts/
+
+# Backup project copy
+apps/desktop.SAFE-POINT.*/
+
+# Generated GTFS TypeScript
+apps/desktop/src/data/gtfs/*.generated.ts
+
+# Source backups
+*.bak*

@@ -1,0 +1,23 @@
+My pnpm workspace exists, but apps/desktop is empty and not a real project yet.
+
+Generate the exact terminal commands and file contents to scaffold a complete app inside apps/desktop using:
+- Vite
+- React
+- TypeScript
+- Tailwind CSS
+- Tauri-ready structure
+
+Requirements:
+- package name must be exactly "desktop"
+- include package.json
+- include src folder
+- include a simple app with a sidebar and placeholder pages
+- compatible with pnpm workspace on macOS
+- do not assume any tar.gz archive exists
+
+Output ONLY:
+1. terminal commands in order
+2. file contents
+3. run commands
+
+Do not explain.

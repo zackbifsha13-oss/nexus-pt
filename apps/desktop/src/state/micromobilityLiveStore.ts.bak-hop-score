@@ -1,0 +1,57 @@
+export type HopVehicle = {
+  id: string;
+  lng: number;
+  lat: number;
+  battery: number;
+  available: boolean;
+};
+
+let vehicles: HopVehicle[] = [];
+
+function jitter(value: number, spread = 0.012) {
+  return value + (Math.random() - 0.5) * spread;
+}
+
+export function generateHopMockOnce(cityId = "athens") {
+  const centers =
+    cityId === "thessaloniki"
+      ? [
+          [22.9444, 40.6401],
+          [22.9344, 40.6388],
+          [22.9525, 40.6368],
+        ]
+      : [
+          [23.7339, 37.9758],
+          [23.7204, 37.9783],
+          [23.7417, 37.9806],
+          [23.6986, 37.9564],
+          [23.7282, 37.9845],
+        ];
+
+  vehicles = Array.from({ length: cityId === "thessaloniki" ? 35 : 60 }, (_, i) => {
+    const c = centers[i % centers.length];
+
+    return {
+      id: `HOP-${cityId.toUpperCase()}-${i + 1}`,
+      lng: jitter(c[0]),
+      lat: jitter(c[1]),
+      battery: Math.round(25 + Math.random() * 75),
+      available: Math.random() > 0.18,
+    };
+  });
+
+  return vehicles;
+}
+
+export function getHopVehicles(cityId = "athens") {
+  if (vehicles.length === 0) {
+    generateHopMockOnce(cityId);
+  }
+
+  return vehicles;
+}
+
+export function resetHopMock(cityId = "athens") {
+  vehicles = [];
+  return generateHopMockOnce(cityId);
+}

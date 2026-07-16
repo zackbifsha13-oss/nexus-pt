@@ -1,0 +1,187 @@
+================================================================================
+NEXUS-PT: PUBLIC TRANSPORT DISRUPTION RESPONSE OPERATOR CONSOLE
+Architecture Reference & Development Prompt
+================================================================================
+
+EXECUTIVE SUMMARY
+─────────────────
+Nexus-PT is a real-time operator console for coordinating multimodal public
+transport responses to disruptions. This is a condensed reference guide for
+development team members implementing the system.
+
+Tech Stack:
+  - Desktop: Tauri + React + TypeScript
+  - Backend: FastAPI (Python)
+  - Graph Modeling: NetworkX
+  - Database: SQLite (v1)
+  - Orchestration: Docker Compose
+
+
+================================================================================
+SYSTEM LAYERS & SERVICES
+================================================================================
+
+FRONTEND SERVICES (React/TypeScript)
+────────────────────────────────────
+• NetworkStateService: Live graph state, node/edge updates, WebSocket subscription
+• DisruptionAlertService: Real-time alerts, severity filtering, dismissal
+• InterventionUIService: Ranked options display, detail panels, expansion
+• DecisionWorkflowService: Accept/modify/reject workflow, state tracking
+• AuditUIService: Audit trail viewer, search, filter, export (CSV/JSON/PDF)
+
+BACKEND SERVICES (FastAPI/Python)
+──────────────────────────────────
+• NetworkService: Graph management, multimodal support, capacity/travel-time updates
+• DisruptionDetectionService: Pattern matching, impact propagation, resolution
+• InterventionGeneratorService: Candidate generation, mode/capacity filtering
+• ScoringService: Multi-factor ranking (passenger impact, feasibility, confidence)
+• AuditService: Decision logging, modification tracking, compliance export
+• ConfigService: System configuration, scoring weights, role management
+• ExternalDataService: GTFS-RT polling, traffic APIs, weather feeds
+
+MODEL LAYER (Algorithm Implementation)
+───────────────────────────────────────
+• NetworkModel: NetworkX multimodal graph (nodes/edges with mode attributes)
+• DisruptionDetector: Pattern detection, downstream impact analysis
+• PassengerFlowEstimator: OD matrix, path-based routing, flow estimation
+• InterventionRanker: Score-based ranking with tie-breaking
+• ScoringEngine: Weighted multi-factor calculation
+
+
+================================================================================
+API ROUTES (ESSENTIAL)
+================================================================================
+
+WebSocket: ws://localhost:8000/ws/updates
+
+REST Endpoints:
+  GET    /api/network
+  GET    /api/disruptions
+  POST   /api/disruptions/manual
+  GET    /api/interventions?disruption_id=X
+  POST   /api/interventions/regenerate
+  POST   /api/decisions
+  GET    /api/decisions?disruption_id=X
+  GET    /api/audit-log?start_date=X&end_date=Y
+  GET    /api/audit-log/export?format=csv|json|pdf
+
+
+================================================================================
+FRONTEND ROUTES
+================================================================================
+
+/dashboard          → Real-time overview
+/network            → Graph visualization
+/disruptions        → Disruption list/details
+/interventions      → Operator workflow
+/audit-log          → Searchable audit trail
+/settings           → Configuration
+
+
+================================================================================
+CRITICAL IMPLEMENTATION CHECKLIST
+================================================================================
+
+1. MULTIMODAL GRAPH:
+   ✓ NetworkX DiGraph with mode attributes
+   ✓ Modes: bus, metro, tram, rail, DRT, taxi, micromobility
+   ✓ Track capacity, travel times, incidents
+
+2. DISRUPTION PROPAGATION:
+   ✓ Detect link closures, capacity loss, travel time anomalies
+   ✓ Cascade impact analysis
+   ✓ Estimate affected passengers
+
+3. PASSENGER FLOW:
+   ✓ Origin-destination matrix per mode
+   ✓ Path-based flow estimation
+   ✓ Calculate intervention impact
+
+4. SCORING ENGINE:
+   ✓ Multi-factor: passenger_impact, feasibility, resource_availability, confidence
+   ✓ Normalize factors to [0,1] range
+   ✓ Configurable weights via API
+
+5. PLAIN-LANGUAGE GENERATION:
+   ✓ Auto-generate intervention explanations
+   ✓ Include specific metrics in rationale
+
+6. AUDIT IMMUTABILITY:
+   ✓ Append-only audit_log table
+   ✓ Track before/after state
+   ✓ Never update/delete entries
+
+7. OPERATOR WORKFLOW:
+   ✓ Accept → Recorded
+   ✓ Modify → Re-score → Accept → Recorded
+   ✓ Reject → Recorded with reason
+
+8. WEBSOCKET REALTIME:
+   ✓ Batch message updates
+   ✓ Connection resilience (reconnect, heartbeat)
+
+
+================================================================================
+QUICK START
+================================================================================
+
+Setup:
+  1. docker-compose up -d
+  2. cd backend && pip install -r requirements-dev.txt
+  3. alembic upgrade head
+  4. cd ../frontend && npm install
+  5. npm run dev (one terminal) + python -m uvicorn app.main:app --reload (another)
+
+Testing:
+  - Backend: pytest
+  - Frontend: npm test
+  - API Docs: http://localhost:8000/docs
+
+Load Sample Data:
+  python backend/scripts/load_sample_network.py
+
+
+================================================================================
+DEVELOPMENT PHASES (30 WEEKS)
+================================================================================
+
+Phase 1-2 (Wks 1-6):    Foundation + Network Modeling
+Phase 3-4 (Wks 7-12):   Disruption Detection + Intervention Generation
+Phase 5-6 (Wks 13-18):  Scoring + Decision Workflow
+Phase 7-8 (Wks 19-24):  Audit + External Data
+Phase 9-10 (Wks 25-30): Testing + Deployment
+
+See docs/01-architecture.txt for full details.
+
+
+================================================================================
+COMMON COMMANDS
+================================================================================
+
+Docker:
+  docker-compose up -d
+  docker-compose logs -f backend
+  docker-compose down
+
+Backend:
+  cd backend
+  alembic upgrade head
+  pytest
+  pytest --cov
+  python scripts/load_sample_network.py
+
+Frontend:
+  cd frontend
+  npm run dev
+  npm run tauri dev
+  npm test
+  npm run build
+
+Database:
+  sqlite3 nexus-pt.db
+  SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 10;
+
+
+================================================================================
+END OF REFERENCE
+================================================================================

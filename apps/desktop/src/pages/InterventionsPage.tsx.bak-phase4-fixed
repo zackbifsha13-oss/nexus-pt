@@ -1,0 +1,529 @@
+import { useEffect, useState } from "react";
+import { getCityData } from "../data/cityData";
+import {
+  acceptIntervention,
+  rejectIntervention,
+  modifyIntervention,
+  isAccepted,
+  getAccepted,
+  subscribeInterventions,
+} from "../state/interventionStore";
+import { subscribeTimeline } from "../state/timelineStore";
+import { scoreHopAvailability } from "../state/micromobilityLiveStore";
+import { getDecisionLog } from "../state/decisionLogStore";
+import { getSelectedProposalId, setSelectedProposalId, subscribeProposalSelection } from "../state/proposalSelectionStore";
+
+function confidenceColor(confidence: number) {
+  if (confidence >= 85) return "#10b981";
+  if (confidence >= 70) return "#3b82f6";
+  if (confidence >= 55) return "#f59e0b";
+  return "#ef4444";
+}
+
+function formatEffectChip(effect: string) {
+  return (
+    <span
+      key={effect}
+      style={{
+        fontSize: 11,
+        color: "#cbd5e1",
+        border: "1px solid #334155",
+        borderRadius: 999,
+        padding: "3px 8px",
+        background: "#0f1117",
+      }}
+    >
+      {effect}
+    </span>
+  );
+}
+
+function getEffectSummary(p: any): string[] {
+  const fx = p.effects || {};
+  const out: string[] = [];
+
+  if (typeof fx.severityDelta === "number") {
+    const pct = Math.round(Math.abs(fx.severityDelta) * 100);
+    out.push(`Severity -${pct}%`);
+  }
+
+  if (typeof fx.durationDeltaMin === "number") {
+    const mins = Math.abs(fx.durationDeltaMin);
+    out.push(`Duration -${mins} min`);
+  }
+
+  if (fx.resolveAtAcceptance) {
+    out.push("Immediate resolve");
+  }
+
+  if (fx.loadRedistribution && typeof fx.loadRedistribution === "object") {
+    const keys = Object.keys(fx.loadRedistribution);
+    if (keys.length > 0) {
+      out.push(`Network load rebalance`);
+    }
+  }
+
+  return out;
+}
+
+
+function getImpactChips(p: any) {
+  const fx = p.effects || {};
+  const chips: string[] = [];
+
+  if (typeof fx.severityDelta === "number") {
+    const pct = Math.round(Math.abs(fx.severityDelta) * 100);
+    chips.push(`Severity ↓ ${pct}%`);
+  }
+
+  if (typeof fx.durationDeltaMin === "number") {
+    chips.push(`Recovery -${Math.abs(fx.durationDeltaMin)} min`);
+  }
+
+  if (fx.resolveAtAcceptance) {
+    chips.push("Resolves incident");
+  }
+
+  if (fx.loadRedistribution) {
+    chips.push("Network rebalance");
+  }
+
+  return chips;
+}
+function normalizeLineKey(line?: string) {
+  const raw = String(line || "").toUpperCase();
+  if (raw.includes("M1")) return "M1";
+  if (raw.includes("M2")) return "M2";
+  if (raw.includes("M3")) return "M3";
+  if (raw.includes("T4")) return "T4";
+  if (raw.includes("040")) return "B040";
+  if (raw.includes("224")) return "B224";
+  if (raw.includes("X95")) return "BX95";
+  if (raw.includes("METRO")) return "METRO";
+  return null;
+}
+
+function fallbackLinesFor(line?: string) {
+  const key = normalizeLineKey(line);
+  const map: Record<string, string[]> = {
+    M1: ["M2", "B040"],
+    M2: ["M1", "M3", "B040"],
+    M3: ["M2", "BX95"],
+    T4: ["B040", "BX95"],
+    B040: ["M1", "M2", "M3"],
+    B224: ["B040"],
+    BX95: ["M3", "B040"],
+    METRO: [],
+  };
+  return key ? (map[key] || []) : [];
+}
+
+function describeEffects(p: any) {
+  const fx = p.effects || {};
+  const parts: string[] = [];
+
+  if (typeof fx.severityDelta === "number" && fx.severityDelta < 0) {
+    parts.push(`severity ${Math.round(Math.abs(fx.severityDelta) * 100)}% down`);
+  }
+
+  if (typeof fx.durationDeltaMin === "number" && fx.durationDeltaMin < 0) {
+    parts.push(`${Math.abs(fx.durationDeltaMin)} min faster recovery`);
+  }
+
+  if (fx.resolveAtAcceptance) {
+    parts.push("resolves incident");
+  }
+
+  return parts;
+}
+
+function getProposalPerformanceSignal(proposalId: string) {
+  const outcomes = getDecisionLog()
+    .filter((entry: any) => String(entry.proposalId) === String(proposalId))
+    .filter((entry: any) => entry.outcome && typeof entry.outcome.accuracyScore === "number")
+    .sort((a: any, b: any) => new Date(a.outcome.evaluatedAt).getTime() - new Date(b.outcome.evaluatedAt).getTime());
+
+  if (outcomes.length === 0) {
+    return {
+      label: "Unproven",
+      trend: "",
+      color: "#94a3b8",
+      border: "#334155",
+      background: "#0f172a",
+    };
+  }
+
+  const avg =
+    outcomes.reduce((sum: number, entry: any) => sum + entry.outcome.accuracyScore, 0) /
+    outcomes.length;
+
+  let trend = "→";
+  if (outcomes.length >= 2) {
+    const recent = outcomes.slice(-2);
+    const delta =
+      recent[1].outcome.accuracyScore - recent[0].outcome.accuracyScore;
+
+    if (delta >= 5) trend = "↑";
+    else if (delta <= -5) trend = "↓";
+  }
+
+  if (avg >= 80) {
+    return {
+      label: `Performs well · ${Math.round(avg)}% ${trend}`,
+      trend,
+      color: "#86efac",
+      border: "#166534",
+      background: "#052e16",
+    };
+  }
+
+  if (avg >= 55) {
+    return {
+      label: `Uncertain · ${Math.round(avg)}% ${trend}`,
+      trend,
+      color: "#fde68a",
+      border: "#92400e",
+      background: "#451a03",
+    };
+  }
+
+  return {
+    label: `Underperforming · ${Math.round(avg)}% ${trend}`,
+    trend,
+    color: "#fca5a5",
+    border: "#991b1b",
+    background: "#450a0a",
+  };
+}
+
+export default function InterventionsPage() {
+  const [, forceUpdate] = useState(0);
+  const [acceptedIds, setAcceptedIds] = useState<string[]>(getAccepted());
+
+  useEffect(() => {
+    const rerender = () => {
+      setAcceptedIds(getAccepted());
+      forceUpdate((x) => x + 1);
+    };
+
+    const unsubInterventions = subscribeInterventions(rerender);
+    const unsubTimeline = subscribeTimeline(rerender);
+    const unsubProposalSelection = subscribeProposalSelection(rerender);
+
+    return () => {
+      unsubInterventions();
+      unsubTimeline();
+      unsubProposalSelection();
+    };
+  }, []);
+
+  const city = getCityData();
+  const { INTERVENTIONS, DISRUPTIONS, CITY_CONFIG } = city;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 14, color: "#94a3b8" }}>
+          {CITY_CONFIG.operator} · Intervention Console
+        </div>
+        <div style={{ fontSize: 12, color: "#94a3b8" }}>
+          {INTERVENTIONS.length} proposals
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+          gap: 16,
+        }}
+      >
+        {INTERVENTIONS.map((p: any) => {
+          const accepted = acceptedIds.includes(String(p.id)) || isAccepted(p.id);
+          const disruption = DISRUPTIONS.find((d: any) => d.id === p.disruptionId);
+          const effects = getEffectSummary(p);
+
+          // SAFE HOP calculation (no location yet)
+          const hopScore = scoreHopAvailability("athens", null, 500);
+          const performanceSignal = getProposalPerformanceSignal(p.id);
+
+          return (
+            <div
+              key={p.id}
+              onClick={() => setSelectedProposalId(getSelectedProposalId() === p.id ? null : p.id)}
+              style={{
+                background: getSelectedProposalId() === p.id ? "rgba(8,145,178,0.18)" : "#161b26",
+                border: getSelectedProposalId() === p.id
+                  ? "1px solid #22d3ee"
+                  : accepted
+                    ? "1px solid #10b981"
+                    : "1px solid #2a3347",
+                borderRadius: 12,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                boxShadow: getSelectedProposalId() === p.id
+                  ? "0 0 0 1px rgba(34,211,238,0.25) inset, 0 0 24px rgba(34,211,238,0.12)"
+                  : accepted
+                    ? "0 0 0 1px rgba(16,185,129,0.15) inset"
+                    : "none",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#e2e8f0" }}>
+
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                      {getImpactChips(p).map((chip) => (
+                        <span
+                          key={chip}
+                          style={{
+                            fontSize: 11,
+                            padding: "3px 8px",
+                            borderRadius: 999,
+                            background: "#0f172a",
+                            border: "1px solid #334155",
+                            color: "#cbd5e1",
+                          }}
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                    </div>
+
+                    {p.action}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+                    #{p.rank} · {disruption?.title || p.disruptionId}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: accepted ? "#10b981" : "#94a3b8",
+                      textTransform: "uppercase",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {accepted ? "accepted" : "pending"}
+                  </div>
+
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 8px",
+                      borderRadius: 999,
+                      background: performanceSignal.background,
+                      border: `1px solid ${performanceSignal.border}`,
+                      color: performanceSignal.color,
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {performanceSignal.label}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "#cbd5e1",
+                    border: "1px solid #334155",
+                    background: "#0f172a",
+                    borderRadius: 999,
+                    padding: "4px 8px",
+                  }}
+                >
+                  HOP score: {hopScore.score}
+                </span>
+              </div>
+
+              {effects.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {effects.map(formatEffectChip)}
+                </div>
+              )}
+
+              <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 }}>
+                {p.rationale}
+              </div>
+
+              {!!p.resources?.length && (
+                <div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                    Resources
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {p.resources.map((r: string, idx: number) => (
+                      <div key={idx} style={{ fontSize: 12, color: "#cbd5e1" }}>
+                        • {r}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                  Pax·min saved
+                </span>
+                <span style={{ fontWeight: 700, color: "#10b981" }}>
+                  +{p.passengerMinutesSaved.toLocaleString()}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    flex: 1,
+                    height: 6,
+                    borderRadius: 999,
+                    background: "#2a3347",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.max(10, Math.min(100, p.confidence || 50))}%`,
+                      height: 6,
+                      background: confidenceColor(p.confidence || 0),
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                  {p.confidence || 0}%
+                </span>
+              </div>
+
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                Accepted debug: {accepted ? "YES" : "NO"}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                {!accepted ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+
+                      setAcceptedIds((ids) =>
+                        ids.includes(String(p.id)) ? ids : [...ids, String(p.id)]
+                      );
+
+                      acceptIntervention(p.id, {
+                        disruptionId: p.disruptionId,
+                        snapshot: {
+                          cityId: city.CITY_CONFIG.id,
+                          line: disruption?.line,
+                          location: disruption?.location,
+                          severity: disruption?.severity,
+                          affectedPax: disruption?.affectedPax,
+                          passengerMinutesSaved: p.passengerMinutesSaved,
+                          confidence: p.confidence,
+                          expectedSeverityDelta: p.effects?.severityDelta,
+                          expectedDurationDeltaMin: p.effects?.durationDeltaMin,
+                          expectedResolve: !!p.effects?.resolveAtAcceptance,
+                        },
+                      });
+
+                      forceUpdate((x) => x + 1);
+                    }}
+                    style={{
+                      background: "#10b981",
+                      border: "none",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      color: "#04130d",
+                    }}
+                  >
+                    Accept
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+
+                      setAcceptedIds((ids) => ids.filter((id) => id !== String(p.id)));
+
+                      rejectIntervention(p.id, {
+                        disruptionId: p.disruptionId,
+                        snapshot: {
+                          cityId: city.CITY_CONFIG.id,
+                          line: disruption?.line,
+                          location: disruption?.location,
+                          severity: disruption?.severity,
+                          affectedPax: disruption?.affectedPax,
+                          passengerMinutesSaved: p.passengerMinutesSaved,
+                          confidence: p.confidence,
+                        },
+                      });
+
+                      forceUpdate((x) => x + 1);
+                    }}
+                    style={{
+                      background: "#f59e0b",
+                      border: "none",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      color: "#1f1300",
+                    }}
+                  >
+                    Undo
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    modifyIntervention(p.id, {
+                      disruptionId: p.disruptionId,
+                      note: "Operator requested proposal modification",
+                      snapshot: {
+                        cityId: city.CITY_CONFIG.id,
+                        line: disruption?.line,
+                        location: disruption?.location,
+                        severity: disruption?.severity,
+                        affectedPax: disruption?.affectedPax,
+                        passengerMinutesSaved: p.passengerMinutesSaved,
+                        confidence: p.confidence,
+                      },
+                    });
+
+                    forceUpdate((x) => x + 1);
+                  }}
+                  style={{
+                    background: "#3b82f6",
+                    border: "none",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    fontWeight: 600,
+                    color: "white",
+                  }}
+                >
+                  Modify
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
