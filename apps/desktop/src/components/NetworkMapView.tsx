@@ -420,9 +420,7 @@ function formatMmOperatorLabel(operator: string) {
 }
 
 
-function detectConflictRmapboxgl.accessToken= import.meta.env.VITE_MAPBOX_TOKEN
-x
-Xsk(proposal: any, applied: any[]) {
+function detectConflictRisk(proposal: any, applied: any[]) {
   if (!proposal || applied.length === 0) return false;
 
   return applied.some((p: any) => {
